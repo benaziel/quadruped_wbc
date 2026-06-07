@@ -14,6 +14,7 @@ $$
 where $\ddot{q} \in \mathbb{R}^{18}$ is generalized acceleration (base contributes six and the twelve actuated joints contribute the rest), $\lambda \in \mathbb{R}^{12}$ represents contact forces (four feet, each with a 3D reaction force), and $\tau \in \mathbb{R}^{12}$ represents joint torques for the twelve actuated joints.
 
 The three blocks are coupled through the floating-base EoM:
+
 $$
 M(q) \ddot{q} + C(q, \dot{q}) = S^\top \tau + J_c^\top \lambda
 $$

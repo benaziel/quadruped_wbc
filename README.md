@@ -2,6 +2,7 @@
 
 Multi-task hierarchical optimization loop using a master gait clock to schedule contact transitions while OSQP solves for instantaneous joint torques.
 
+https://github.com/user-attachments/assets/6551023c-e4f8-47e9-8bcb-4290fe995e6c
 
 At a high level, there's open-loop clock scheduling tracking a diagonal trot gait with sinusoidal leg-swing clearance curves and a Raibert-based foot placement heuristic. Further down there's a multi-objective QP tracking base position, spatial orientation, forward velocity, and null-space joint posture.
 

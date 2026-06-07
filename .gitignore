@@ -1,0 +1,46 @@
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+
+# venv / uv
+.venv/
+venv/
+.python-version
+
+# uv
+.uv/
+uv.lock
+
+# env
+.env
+.env.*
+!.env.example
+
+# vscode
+.vscode/
+*.code-workspace
+
+# testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# mypy / ruff / type checkers
+.mypy_cache/
+.ruff_cache/
+
+# os
+.DS_Store
+Thumbs.db
+
+MUJOCO_LOG.TXT

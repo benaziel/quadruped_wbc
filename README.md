@@ -10,7 +10,9 @@ At a high level, there's open-loop clock scheduling tracking a diagonal trot gai
 
 The decision vector is
 
-$$x = \begin{bmatrix} \ddot{q} \\ \lambda \\ \tau \end{bmatrix} \in \mathbb{R}^{42}.$$
+$$
+x = \begin{bmatrix} \ddot{q} \\ \lambda \\ \tau \end{bmatrix} \in \mathbb{R}^{42}.
+$$
 
 Because a WBC is a snapshot optimizer, i.e., it's got a horizon of one timestep, it has no recursive feasibility. It has no problems commanding massive forces/torques, so managing these floating-base dynamics requires a more long-term strategy. I'm also just relying on Raibert (which is effectively a geometric hack) to tell the swing legs where to land, and while it works for steady-state trotting at a single tuned speed, it's probably worthwhile to add a high-level MPC layer that looks ahead over a finite horizon to optimize a low-dimensional model of the robot's centroidal dynamics.
 

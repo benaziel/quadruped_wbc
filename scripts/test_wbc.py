@@ -5,7 +5,7 @@ import imageio
 
 from src.wbc import WBC
 
-SAVING = False
+SAVING = True
 VIDEO_PATH = "go2_trot.mp4"
 
 z_des = 0.3

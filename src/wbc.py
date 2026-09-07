@@ -1,9 +1,8 @@
+import mujoco
 import numpy as np
+import osqp
 from scipy.linalg import block_diag
 import scipy.sparse as sp
-
-import mujoco
-import osqp
 
 
 class WBC:

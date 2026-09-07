@@ -1,3 +1,7 @@
+import mujoco
+import numpy as np
+
+
 class RobotState:
     def __init__(self, model):
         self.model = model
@@ -19,23 +23,34 @@ class RobotState:
 
     def update(self, data):
         self.data = data
-        self.J_feet = self.get_J_feet(data)
-        self.Jdot_feet = self.get_Jdot_feet(
-            data,
-        )
+        self.J_feet = self.get_jacobian(data, self.foot_body_ids, include_rot=False)
+        self.Jdot_feet = self.get_Jdot_feet(data)
         self.M, self.bias = self.get_dynamics(data)
 
         self.p_feet = data.xpos[self.foot_body_ids].copy()
         self.feet_in_contact = self.get_feet_in_contact(data)
 
-    def get_J_feet(data):
+    def get_jacobian(self, data, body_ids, include_rot=True):
+        dofs = 6 if include_rot else 3
+
+        jacobian = np.zeros((len(body_ids), dofs, self.nv))
+        for i, body_id in enumerate(body_ids):
+            J_pos = np.zeros((3, self.nv))
+            J_rot = np.zeros((3, self.nv)) if include_rot else None
+
+            mujoco.mj_jac(self.model, data, J_pos, J_rot, data.xpos[body_id], body_id)
+            jacobian[i] = np.r_[J_pos, J_rot] if include_rot else J_pos
+
+        return jacobian
+
+    def get_Jdot_feet(self, data):
         raise NotImplementedError
 
-    def get_Jdot_feet(data):
-        raise NotImplementedError
+    def get_dynamics(self, data):
+        M = np.zeros((self.nv, self.nv))
+        mujoco.mj_fullM(self.model, M, data.qM)
+        bias = data.qfrc_bias
+        return M, bias
 
-    def get_dynamics(data):
-        raise NotImplementedError
-
-    def get_feet_in_contact(data):
+    def get_feet_in_contact(self, data):
         raise NotImplementedError

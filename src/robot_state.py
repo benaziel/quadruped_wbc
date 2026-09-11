@@ -1,6 +1,8 @@
 import mujoco
 import numpy as np
 
+EPS = np.finfo(np.float64).eps
+
 
 class RobotState:
     def __init__(self, model):
@@ -33,18 +35,28 @@ class RobotState:
     def get_jacobian(self, data, body_ids, include_rot=True):
         dofs = 6 if include_rot else 3
 
-        jacobian = np.zeros((len(body_ids), dofs, self.nv))
+        J = np.zeros((len(body_ids), dofs, self.nv))
         for i, body_id in enumerate(body_ids):
             J_pos = np.zeros((3, self.nv))
             J_rot = np.zeros((3, self.nv)) if include_rot else None
 
             mujoco.mj_jac(self.model, data, J_pos, J_rot, data.xpos[body_id], body_id)
-            jacobian[i] = np.r_[J_pos, J_rot] if include_rot else J_pos
+            J[i] = np.r_[J_pos, J_rot] if include_rot else J_pos
 
-        return jacobian
+        return J
 
     def get_Jdot_feet(self, data):
-        raise NotImplementedError
+        J = self.J_feet
+
+        if self.J_feet_prev is None:
+            Jdot = np.zeros_like(J)
+        else:
+            dt = data.time - self.t_prev
+            Jdot = (J - self.J_feet_prev) / dt if dt > EPS else np.zeros_like(J)
+
+        self.J_feet_prev = J.copy()
+        self.t_prev = data.time
+        return Jdot
 
     def get_dynamics(self, data):
         M = np.zeros((self.nv, self.nv))
@@ -53,4 +65,11 @@ class RobotState:
         return M, bias
 
     def get_feet_in_contact(self, data):
-        raise NotImplementedError
+        measured = [0, 0, 0, 0]
+        for k in range(data.ncon):
+            con = data.contact[k]
+            for geom in (con.geom1, con.geom2):
+                body = self.model.geom_bodyid[geom]
+                if body in self.foot_body_ids:
+                    measured[self.foot_body_ids.index(body)] = True
+        return measured

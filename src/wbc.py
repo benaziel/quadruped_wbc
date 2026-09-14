@@ -1,4 +1,3 @@
-import mujoco
 import numpy as np
 import osqp
 from scipy.linalg import block_diag
@@ -14,15 +13,6 @@ class WBC:
         self.n_tau = 12  # actuated joints, i don't think we actuate the torso
         self.n = self.nv + self.n_lambda + self.n_tau
 
-        self.foot_body_ids = [
-            model.body(name).id for name in ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
-        ]
-        self.thigh_body_ids = [
-            model.body(name).id
-            for name in ["FL_thigh", "FR_thigh", "RL_thigh", "RR_thigh"]
-        ]
-        self.base_body_id = model.body("base_link").id
-
         self.mu = mu
         self.tau_min = model.actuator_ctrlrange[:, 0]
         self.tau_max = model.actuator_ctrlrange[:, 1]
@@ -37,45 +27,6 @@ class WBC:
         self.prob = None
         self.Q_pat = None
         self.P_pat = None
-        self.prev_J = None
-        self.prev_time = None
-
-    def get_jacobian(self, data, body_ids):
-        jacobians = np.zeros((len(body_ids), 3, self.nv))
-        for i, body_id in enumerate(body_ids):
-            jacp = np.zeros((3, self.nv))
-            jacr = np.zeros((3, self.nv))
-            mujoco.mj_jac(
-                self.model,
-                data,
-                jacp,
-                jacr,
-                data.xpos[body_id],
-                body_id,
-            )
-
-            jacobians[i] = jacp
-
-        return jacobians
-
-    def update_foot_kinematics(self, data):
-        J = self.get_jacobian(data, tuple(self.foot_body_ids))
-
-        if self.prev_J is None:
-            Jdot = np.zeros_like(J)
-        else:
-            dt = data.time - self.prev_time
-            Jdot = (J - self.prev_J) / dt if dt > 1e-9 else np.zeros_like(J)
-        self.prev_J = J.copy()
-        self.prev_time = data.time
-        return J, Jdot
-
-    def get_dynamics(self, data):
-        M = np.zeros((self.nv, self.nv))
-        mujoco.mj_fullM(self.model, M, data.qM)
-
-        bias = data.qfrc_bias
-        return M, bias
 
     def friction_cone(self, mu):
         return np.array([
@@ -86,50 +37,9 @@ class WBC:
             [0, 0, -1],
         ])
 
-    def trot_contact_mask(self, t, period=0.5):
-        phase = (t % period) / period  # goes from 0-1
-        if phase < 0.5:
-            return [1, 0, 0, 1]
-        else:
-            return [0, 1, 1, 0]
-
-    def swing_phase(self, foot_idx, t, period=0.5):
-        phase = (t % period) / period
-        if foot_idx in (0, 3):
-            return float(np.clip((phase - 0.5) / 0.5, 0.0, 1.0))
-        return float(np.clip(phase / 0.5, 0.0, 1.0))
-
-    def feet_in_contact(self, data):
-        # measured contact state from the engine, per foot
-        measured = [False] * 4
-        for k in range(data.ncon):
-            con = data.contact[k]
-            for geom in (con.geom1, con.geom2):
-                body = self.model.geom_bodyid[geom]
-                if body in self.foot_body_ids:
-                    measured[self.foot_body_ids.index(body)] = True
-        return measured
-
-    def compute_swing_p_des(
-        self, data, foot_idx, v_des, swing_phase, step_height=0.06, k=0.05, period=0.5
-    ):
-        # thigh is directly above the natural foot stance position (hip has a y-offset to the thigh)
-        thigh_pos = data.xpos[self.thigh_body_ids[foot_idx]].copy()
-        v_body = data.qvel[:3]
-        T_stance = period / 2
-
-        xy = thigh_pos[:2] + (T_stance / 2) * v_body[:2] + k * (v_body[:2] - v_des[:2])
-        z = step_height * np.sin(np.pi * swing_phase)
-
-        # velocity feedforward: time-derivative of the z trajectory
-        T_swing = period / 2
-        vz = step_height * np.pi / T_swing * np.cos(np.pi * swing_phase)
-
-        return np.array([xy[0], xy[1], z]), np.array([0.0, 0.0, vz])
-
-    def compute_qp(self, data, contact_mask, tasks, J_feet, Jdot_feet):
-        J_c_T = J_feet.reshape(self.n_lambda, self.nv).T
-        M, bias = self.get_dynamics(data)
+    def compute_qp(self, state, contact_mask, tasks):
+        J_c_T = state.J_feet.reshape(self.n_lambda, self.nv).T
+        M, bias = state.M, state.bias
 
         # dynamics
         A = np.hstack([M, -J_c_T, -self.S_T])
@@ -180,52 +90,9 @@ class WBC:
         )
 
         for task in tasks:
-            if task["type"] == "base_height":
-                J = np.zeros((1, self.nv))
-                J[0, 2] = 1.0
-
-                ddot_des = task["kp"] * (task["z_des"] - data.qpos[2]) + task["kd"] * (
-                    -data.qvel[2]
-                )
-                e = np.array([ddot_des])
-
-            elif task["type"] == "base_orientation":
-                # mju_subQuat returns the error in the same local frame (free-joint angular dofs)
-                J = np.zeros((3, self.nv))
-                J[:, 3:6] = np.eye(3)
-
-                res = np.zeros(3)
-                mujoco.mju_subQuat(res, np.array([1.0, 0.0, 0.0, 0.0]), data.qpos[3:7])
-                e = task["kp"] * res + task["kd"] * (-data.qvel[3:6])
-
-            elif task["type"] == "swing_foot":
-                i = task["foot_idx"]
-                J = J_feet[i]
-
-                p_foot = data.xpos[self.foot_body_ids[i]].copy()
-                v_foot = J @ data.qvel
-                v_des_task = task.get("v_des", np.zeros(3))
-                ddot_des = task["kp"] * (task["p_des"] - p_foot) + task["kd"] * (
-                    v_des_task - v_foot
-                )
-                e = ddot_des - Jdot_feet[i] @ data.qvel
-
-            elif task["type"] == "base_linear_vel":
-                J = np.zeros((3, self.nv))
-                J[:, 0:3] = np.eye(3)
-                e = task["kp"] * (task["v_des"] - data.qvel[0:3])
-
-            elif task["type"] == "posture":
-                J = np.hstack([np.zeros((self.n_tau, 6)), np.eye(self.n_tau)])
-                e = task["kp"] * (task["q_des"] - data.qpos[7:]) + task["kd"] * (
-                    -data.qvel[6:]
-                )
-
-            else:
-                continue
-
-            Q[: self.nv, : self.nv] += task["w"] * J.T @ J
-            q[: self.nv] += -task["w"] * J.T @ e
+            J, e = task.compute(state)
+            Q[: self.nv, : self.nv] += task.w * J.T @ J
+            q[: self.nv] += -task.w * J.T @ e
 
         if self.prob is None:
             self._setup_problem(Q, q, P, l, u)
